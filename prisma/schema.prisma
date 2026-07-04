@@ -43,6 +43,7 @@ invoicePrefix    String?  @default("OKR")
   expenses     Expense[]
   appointments Appointment[]
   visits    Visit[]
+  outreachLogs OutreachLog[]
 }
 
 // ─── DOCTOR ───────────────────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ model Patient {
   invoices     Invoice[]
   receipts     Receipt[]
   appointments Appointment[]
+  outreachLogs OutreachLog[]
 
   @@index([clinicId])
   @@index([clinicId, createdAt])
@@ -743,4 +745,20 @@ model ClinicCounter {
   updatedAt DateTime @updatedAt
 
   @@unique([clinicId, kind])
+}
+model OutreachLog {
+  id         String   @id @default(cuid())
+  clinicId   String
+  patientId  String
+  kind       String
+  contextId  String?
+  sentAt     DateTime @default(now())
+  markedBy   String
+  notes      String?
+
+  clinic  Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, kind, sentAt])
+  @@index([patientId])
 }
