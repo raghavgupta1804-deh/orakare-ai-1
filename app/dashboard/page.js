@@ -189,6 +189,7 @@ export default async function DashboardPage() {
       phone: apt.phone,
       source: apt.source,
       patient: apt.patient,
+      createdAt: apt.createdAt,
     })
   })
   const missedForWidget = missedApts.map(function(apt) {
@@ -200,6 +201,7 @@ export default async function DashboardPage() {
       phone: apt.phone,
       source: apt.source,
       patient: apt.patient,
+      createdAt: apt.createdAt,
     }
   })
 

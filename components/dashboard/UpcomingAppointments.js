@@ -1,33 +1,46 @@
+'use client'
+
+import { useState } from 'react'
 import Link from 'next/link'
 
 /**
  * Upcoming Appointments widget for the dashboard.
  *
- * Two sections:
- *  1. Missed — appointments where date < today AND status = SCHEDULED
- *     (patient didn't show up but wasn't marked otherwise)
- *  2. Upcoming — next 7 days, grouped by day (Today, Tomorrow, day-of-week)
+ * Three collapsible sections:
+ *   1. Missed  — SCHEDULED appointments with date < today (past 14 days)
+ *                Filter: exclude ghost entries where createdAt > date (backfilled data)
+ *   2. Today   — appointments where date is today
+ *   3. Next 7  — appointments where date is between tomorrow and +7 days
  *
- * Each row: patient name, mobile, time (if slot set), source badge.
- * Small source badge helps verification per Dr. Shobhna's request.
+ * Default expand state:
+ *   Missed:  expanded (needs attention)
+ *   Today:   expanded (today's business)
+ *   Next 7:  collapsed (browse when needed)
+ *
+ * Each row: patient name, mobile, time (if slot), source badge (OraKare / Website / External).
+ * Clicking a patient jumps to their patient record.
  */
 
 const IST = 'Asia/Kolkata'
 
-function fmtDayLabel(d, today) {
-  const dt = new Date(d)
-  const t = new Date(today)
-  dt.setHours(0, 0, 0, 0)
-  t.setHours(0, 0, 0, 0)
-  const dayMs = 24 * 60 * 60 * 1000
-  const diff = Math.round((dt.getTime() - t.getTime()) / dayMs)
-  if (diff === 0) return 'Today'
-  if (diff === 1) return 'Tomorrow'
-  return dt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: IST })
+function sameISODay(a, b) {
+  const aIST = new Date(new Date(a).toLocaleString('en-US', { timeZone: IST }))
+  const bIST = new Date(new Date(b).toLocaleString('en-US', { timeZone: IST }))
+  return aIST.getFullYear() === bIST.getFullYear() &&
+    aIST.getMonth() === bIST.getMonth() &&
+    aIST.getDate() === bIST.getDate()
 }
 
-function fmtMissedLabel(d) {
-  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: IST })
+function fmtDayLabel(d) {
+  return new Date(d).toLocaleDateString('en-IN', {
+    weekday: 'short', day: 'numeric', month: 'short', timeZone: IST,
+  })
+}
+
+function fmtShortDate(d) {
+  return new Date(d).toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'short', timeZone: IST,
+  })
 }
 
 function sourceBadge(source) {
@@ -44,7 +57,7 @@ function sourceBadge(source) {
   )
 }
 
-function AppointmentRow({ apt }) {
+function AppointmentRow({ apt, dateLabel }) {
   const p = apt.patient || {}
   const patientId = p.id
   const name = p.name || apt.name || 'Patient'
@@ -55,8 +68,10 @@ function AppointmentRow({ apt }) {
       <div className="flex-1 min-w-0">
         <div className="text-sm text-slate-900 truncate">{name}</div>
         <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+          {dateLabel && <span className="text-slate-500">{dateLabel}</span>}
+          {dateLabel && apt.slot && <span>·</span>}
           {apt.slot && <span>{apt.slot}</span>}
-          {apt.slot && phone && <span>·</span>}
+          {(apt.slot || dateLabel) && phone && <span>·</span>}
           {phone && <span>{phone}</span>}
         </div>
       </div>
@@ -81,20 +96,80 @@ function AppointmentRow({ apt }) {
   )
 }
 
-export default function UpcomingAppointments({ missed, upcomingByDay, todayIso }) {
-  const dayKeys = Object.keys(upcomingByDay).sort()
-  const totalUpcoming = dayKeys.reduce(function(s, k) { return s + upcomingByDay[k].length }, 0)
-  const totalMissed = missed.length
+function Section({ title, icon, count, tone, defaultOpen, children }) {
+  const [open, setOpen] = useState(defaultOpen)
 
-  const isEmpty = totalMissed === 0 && totalUpcoming === 0
+  const headerTone = tone === 'red'
+    ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-100'
+    : tone === 'primary'
+      ? 'bg-primary-50 hover:bg-primary-100 text-primary-800 border-primary-100'
+      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-100'
+
+  const countTone = tone === 'red'
+    ? 'text-red-600'
+    : tone === 'primary'
+      ? 'text-primary-700'
+      : 'text-slate-500'
+
+  return (
+    <div>
+      <button
+        onClick={function() { setOpen(function(v) { return !v }) }}
+        className={
+          'w-full px-3 py-2 border-b flex items-center justify-between text-[11px] font-medium transition ' +
+          headerTone
+        }
+      >
+        <span className="flex items-center gap-1.5">
+          <span>{icon}</span>
+          <span>{title}</span>
+          <span className={countTone}>· {count}</span>
+        </span>
+        <span className={'text-[10px] ' + countTone}>{open ? '▼' : '▶'}</span>
+      </button>
+      {open && (
+        <div>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function UpcomingAppointments({ missed, upcomingByDay, todayIso }) {
+  // Filter ghost entries — those where createdAt > date (backfilled after the fact)
+  const missedFiltered = (missed || []).filter(function(a) {
+    if (!a.createdAt || !a.date) return true
+    return new Date(a.createdAt) <= new Date(a.date)
+  })
+
+  // Split upcoming into "today" and "next 7 days"
+  const dayKeys = Object.keys(upcomingByDay || {}).sort()
+
+  const todayApts = []
+  const nextSevenApts = []
+  dayKeys.forEach(function(key) {
+    const list = upcomingByDay[key] || []
+    list.forEach(function(apt) {
+      // Also filter ghost entries
+      if (apt.createdAt && apt.date && new Date(apt.createdAt) > new Date(apt.date)) return
+      if (sameISODay(apt.date, todayIso)) {
+        todayApts.push(apt)
+      } else {
+        nextSevenApts.push(apt)
+      }
+    })
+  })
+
+  const missedCount = missedFiltered.length
+  const todayCount = todayApts.length
+  const nextSevenCount = nextSevenApts.length
+  const isEmpty = missedCount === 0 && todayCount === 0 && nextSevenCount === 0
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col">
       <div className="px-5 pt-5 pb-3 border-b border-slate-100">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-medium text-slate-700">Upcoming appointments</h2>
-          <span className="text-xs text-slate-400">Next 7 days</span>
-        </div>
+        <h2 className="text-sm font-medium text-slate-700">Upcoming appointments</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto max-h-[420px]">
@@ -106,43 +181,40 @@ export default function UpcomingAppointments({ missed, upcomingByDay, todayIso }
           </div>
         )}
 
-        {totalMissed > 0 && (
-          <div>
-            <div className="bg-red-50 border-b border-red-100 px-3 py-1.5 text-[11px] font-medium text-red-800 flex items-center justify-between">
-              <span>⚠ Missed · needs follow-up</span>
-              <span className="text-red-600">{totalMissed}</span>
-            </div>
-            {missed.slice(0, 5).map(function(apt) {
-              return (
-                <div key={apt.id} className="bg-red-50/40">
-                  <div className="px-3 pt-1 pb-0 text-[10px] text-red-600">{fmtMissedLabel(apt.date)}</div>
-                  <AppointmentRow apt={apt} />
-                </div>
-              )
-            })}
-            {missed.length > 5 && (
-              <div className="px-3 py-1.5 text-[11px] text-red-700 bg-red-50/40">
-                +{missed.length - 5} more missed
-              </div>
+        {!isEmpty && (
+          <>
+            {/* Missed section — always show if there are any */}
+            {missedCount > 0 && (
+              <Section title="Missed · needs follow-up" icon="⚠" count={missedCount} tone="red" defaultOpen={true}>
+                {missedFiltered.map(function(apt) {
+                  return <AppointmentRow key={apt.id} apt={apt} dateLabel={fmtShortDate(apt.date)} />
+                })}
+              </Section>
             )}
-          </div>
-        )}
 
-        {dayKeys.map(function(dayKey) {
-          const list = upcomingByDay[dayKey]
-          if (!list || list.length === 0) return null
-          return (
-            <div key={dayKey}>
-              <div className="bg-slate-50 border-b border-slate-100 px-3 py-1.5 text-[11px] font-medium text-slate-600 flex items-center justify-between">
-                <span>{fmtDayLabel(dayKey, todayIso)}</span>
-                <span className="text-slate-400">{list.length}</span>
-              </div>
-              {list.map(function(apt) {
-                return <AppointmentRow key={apt.id} apt={apt} />
-              })}
-            </div>
-          )
-        })}
+            {/* Today section — always show */}
+            <Section title="Today" icon="📅" count={todayCount} tone="primary" defaultOpen={true}>
+              {todayCount === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-400">None today.</div>
+              ) : (
+                todayApts.map(function(apt) {
+                  return <AppointmentRow key={apt.id} apt={apt} dateLabel={null} />
+                })
+              )}
+            </Section>
+
+            {/* Next 7 days section — always show */}
+            <Section title="Next 7 days" icon="📆" count={nextSevenCount} tone="slate" defaultOpen={false}>
+              {nextSevenCount === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-400">Nothing scheduled.</div>
+              ) : (
+                nextSevenApts.map(function(apt) {
+                  return <AppointmentRow key={apt.id} apt={apt} dateLabel={fmtDayLabel(apt.date)} />
+                })
+              )}
+            </Section>
+          </>
+        )}
       </div>
     </div>
   )
