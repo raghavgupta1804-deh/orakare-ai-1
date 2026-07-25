@@ -390,6 +390,7 @@ export async function POST(req, props) {
             slot: nextApt.slot || null,
             notes: 'Scheduled at visit close',
             status: 'SCHEDULED',
+            source: 'ORAKARE',
           },
         })
       }

@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import UpcomingAppointments from './UpcomingAppointments'
 
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -66,6 +67,7 @@ export default function DashboardView(props) {
     todayAppointments, monthRevenue, monthExpTotal,
     totalPatients, activeTreatmentsCount, balancePending,
     pieData, treatmentsRevenueData,
+    upcomingByDay, missedAppointments, todayIso,
     lowStockCount, expiringSoonCount, stockValue,
     pendingPayoutTotal, pendingPayoutConsultants,
     revenueByMonth, expByMonth, months,
@@ -144,8 +146,8 @@ export default function DashboardView(props) {
         </div>
       )}
 
-      {/* Treatments breakdown — volume + revenue side by side (Push #8 Bug 4) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+      {/* Treatments breakdown — volume + revenue + upcoming appointments */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <div className="flex items-baseline justify-between mb-2">
             <h2 className="text-sm font-medium text-slate-700">Treatments — volume</h2>
@@ -186,6 +188,11 @@ export default function DashboardView(props) {
             </div>
           </div>
         </div>
+        <UpcomingAppointments
+          upcomingByDay={upcomingByDay || {}}
+          missed={missedAppointments || []}
+          todayIso={todayIso}
+        />
       </div>
 
       {/* 6-month revenue vs expense */}
